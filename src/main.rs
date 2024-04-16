@@ -56,18 +56,19 @@ impl BlobObject {
 
         let mut size = Vec::new();
         input.read_until(b'\0', &mut size)?;
+        size.pop();
 
         let mut content = String::new();
         input.read_to_string(&mut content)?;
 
         let size = String::from_utf8(size)?.parse::<usize>()?;
         if content.len() != size {
-            anyhow::bail!(
+            anyhow::bail!(format!(
                 "Blob content size {size}: does not match the actual content: {}",
                 content.len()
-            )
+            ))
         }
-        Ok(Self { size: 1, content })
+        Ok(Self { size, content })
     }
 }
 
@@ -77,9 +78,6 @@ fn cat_file(hash: &str) -> anyhow::Result<()> {
     let decoder = ZlibDecoder::new(object);
     let mut bufreader = BufReader::new(decoder);
     let blob = BlobObject::parse(&mut bufreader)?;
-    if blob.content.len() != blob.size {
-        anyhow::bail!("Blob content size does not match")
-    }
     print!("{}", blob.content);
 
     Ok(())
@@ -98,7 +96,7 @@ fn main() {
             (false, _) => eprintln!("pretty-print command is expected for cat-file subcommand"),
             (true, hash) => {
                 if let Err(err) = cat_file(&hash) {
-                    eprintln!("Git cat-file failed with: {err}");
+                    eprintln!("git cat-file failed with: {err}");
                 }
             }
         },
