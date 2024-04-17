@@ -63,7 +63,7 @@ fn main() {
             if let Err(err) = hash {
                 eprintln!("git hash-object failed with: {err}");
             } else {
-                println!("hash-object: {path:?}: {}", hash.unwrap());
+                println!("{}", hash.unwrap());
             }
         }
         None => todo!(),
