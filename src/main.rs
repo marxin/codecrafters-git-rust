@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use std::str;
+use std::{path::PathBuf, str};
 
 mod object;
 mod subcommand;
@@ -17,6 +17,8 @@ enum Commands {
     Init,
     /// Read a blob git object
     CatFile(CatFileArgs),
+    /// Write a blob git object
+    HashObject(HashObjectArgs),
 }
 
 #[derive(Args)]
@@ -27,6 +29,16 @@ struct CatFileArgs {
 
     /// Hash
     hash: String,
+}
+
+#[derive(Args)]
+struct HashObjectArgs {
+    /// Path to a file
+    path: PathBuf,
+
+    /// Write to object storage
+    #[arg(short)]
+    write: bool,
 }
 
 fn main() {
@@ -46,6 +58,14 @@ fn main() {
                 }
             }
         },
+        Some(Commands::HashObject(HashObjectArgs { path, write })) => {
+            let hash = subcommand::hash_object(&path, write);
+            if let Err(err) = hash {
+                eprintln!("git hash-object failed with: {err}");
+            } else {
+                println!("hash-object: {path:?}: {}", hash.unwrap());
+            }
+        }
         None => todo!(),
     }
 }
