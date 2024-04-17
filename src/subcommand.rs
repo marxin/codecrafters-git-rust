@@ -50,7 +50,9 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
         let mut blob_file: File = File::open(path)?;
         let blob_object_path = PathBuf::from(object_path_from_hash(&hash));
         if let Some(folder) = blob_object_path.parent() {
-            fs::create_dir(folder)?;
+            if !folder.exists() {
+                fs::create_dir(folder)?;
+            }
         }
         let object_file = BufWriter::new(File::create(blob_object_path)?);
         let mut encoder = ZlibEncoder::new(object_file, Compression::fast());
