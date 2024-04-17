@@ -3,9 +3,10 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
+use std::io;
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use crate::object::BlobObject;
@@ -42,14 +43,7 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
     let mut hasher = Sha1::new();
     let header = format!("blob {}\0", metadata.len());
     hasher.update(&header);
-    let mut buffer = [0u8; 4096];
-    loop {
-        let n = reader.read(&mut buffer)?;
-        hasher.update(&buffer[..n]);
-        if n == 0 {
-            break;
-        }
-    }
+    io::copy(& mut reader, & mut hasher)?;
 
     let hash = hex::encode(hasher.finalize()).to_string();
     if write {
@@ -62,13 +56,7 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
         let mut encoder = ZlibEncoder::new(object_file, Compression::fast());
 
         let _ = encoder.write(header.as_bytes());
-        loop {
-            let n = blob_file.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            let _ = encoder.write(&buffer[..n]);
-        }
+        io::copy(& mut blob_file, & mut encoder)?;
     }
 
     Ok(hash)
