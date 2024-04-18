@@ -3,13 +3,13 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
-use std::io;
 use std::fs;
 use std::fs::File;
+use std::io;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
-use crate::object::BlobObject;
+use crate::object::{BlobObject, TreeObject};
 
 fn object_path_from_hash(hash: &str) -> String {
     format!(".git/objects/{}/{}", &hash[0..2], &hash[2..])
@@ -27,10 +27,21 @@ pub fn init() -> anyhow::Result<()> {
 pub fn cat_file(hash: &str) -> anyhow::Result<()> {
     let object = File::open(object_path_from_hash(hash))
         .with_context(|| anyhow::anyhow!("cannot open hash object file: {hash}"))?;
-    let decoder = ZlibDecoder::new(object);
-    let mut bufreader = BufReader::new(decoder);
+    let mut bufreader = BufReader::new(ZlibDecoder::new(object));
     let blob = BlobObject::read(&mut bufreader)?;
     print!("{}", blob.content);
+
+    Ok(())
+}
+
+pub fn ls_tree(hash: &str) -> anyhow::Result<()> {
+    let object = File::open(object_path_from_hash(hash))
+        .with_context(|| anyhow::anyhow!("cannot open hash object file: {hash}"))?;
+    let mut bufreader = BufReader::new(ZlibDecoder::new(object));
+    let tree = TreeObject::read(&mut bufreader)?;
+    for entry in tree.items {
+        println!("{}", entry.name);
+    }
 
     Ok(())
 }
@@ -43,7 +54,7 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
     let mut hasher = Sha1::new();
     let header = format!("blob {}\0", metadata.len());
     hasher.update(&header);
-    io::copy(& mut reader, & mut hasher)?;
+    io::copy(&mut reader, &mut hasher)?;
 
     let hash = hex::encode(hasher.finalize()).to_string();
     if write {
@@ -58,7 +69,7 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
         let mut encoder = ZlibEncoder::new(object_file, Compression::fast());
 
         let _ = encoder.write(header.as_bytes());
-        io::copy(& mut blob_file, & mut encoder)?;
+        io::copy(&mut blob_file, &mut encoder)?;
     }
 
     Ok(hash)

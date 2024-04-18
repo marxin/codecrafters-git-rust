@@ -157,6 +157,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "either"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a47c1c47d2f5964e29c61246e81db715514cd532db6b5116a25ea3c03d6780a2"
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -303,6 +309,7 @@ dependencies = [
  "clap",
  "flate2",
  "hex",
+ "itertools",
  "reqwest",
  "sha1",
  "thiserror",
@@ -491,6 +498,15 @@ dependencies = [
  "io-lifetimes",
  "rustix",
  "windows-sys 0.42.0",
+]
+
+[[package]]
+name = "itertools"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
 ]
 
 [[package]]

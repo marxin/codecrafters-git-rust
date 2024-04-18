@@ -19,6 +19,8 @@ enum Commands {
     CatFile(CatFileArgs),
     /// Write a blob git object
     HashObject(HashObjectArgs),
+    /// Inspect a tree object
+    LsTree(LsTreeArgs),
 }
 
 #[derive(Args)]
@@ -41,6 +43,16 @@ struct HashObjectArgs {
     write: bool,
 }
 
+#[derive(Args)]
+struct LsTreeArgs {
+    /// Hash
+    hash: String,
+
+    /// Print only names
+    #[arg(long)]
+    name_only: bool,
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -51,7 +63,7 @@ fn main() {
             }
         }
         Some(Commands::CatFile(CatFileArgs { pretty, hash })) => match (pretty, hash) {
-            (false, _) => eprintln!("pretty-print command is expected for cat-file subcommand"),
+            (false, _) => eprintln!("--pretty-print option is expected for cat-file subcommand"),
             (true, hash) => {
                 if let Err(err) = subcommand::cat_file(&hash) {
                     eprintln!("git cat-file failed with: {err}");
@@ -66,6 +78,14 @@ fn main() {
                 println!("{}", hash.unwrap());
             }
         }
+        Some(Commands::LsTree(LsTreeArgs { name_only, hash })) => match (name_only, hash) {
+            (false, _) => eprintln!("--name-only option is expected for ls-tree subcommand"),
+            (true, hash) => {
+                if let Err(err) = subcommand::ls_tree(&hash) {
+                    eprintln!("git ls-tree failed with: {err}");
+                }
+            }
+        },
         None => todo!(),
     }
 }

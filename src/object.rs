@@ -1,7 +1,9 @@
 use std::io::BufRead;
 
+use itertools::Itertools;
+
 pub struct BlobObject {
-    pub size: usize,
+    pub _size: usize,
     pub content: String,
 }
 
@@ -27,6 +29,57 @@ impl BlobObject {
                 content.len()
             ))
         }
-        Ok(Self { size, content })
+        Ok(Self {
+            _size: size,
+            content,
+        })
+    }
+}
+
+pub struct TreeItem {
+    pub _mode: String,
+    pub name: String,
+    pub _hash: [u8; 20],
+}
+
+pub struct TreeObject {
+    pub _size: usize,
+    pub items: Vec<TreeItem>,
+}
+
+impl TreeObject {
+    pub fn read(input: &mut impl BufRead) -> anyhow::Result<Self> {
+        let mut prefix = [0u8; 5];
+        let _ = input.read_exact(&mut prefix);
+        if &prefix != b"tree " {
+            anyhow::bail!("Unexpected blob object start: {:?}", prefix);
+        }
+
+        let mut size = Vec::new();
+        input.read_until(b'\0', &mut size)?;
+        size.pop();
+        let size = String::from_utf8(size)?.parse::<usize>()?;
+
+        let mut items = Vec::new();
+        loop {
+            let mut line = Vec::new();
+            let n = input.read_until(b'\0', &mut line)?;
+            if n == 0 {
+                break;
+            }
+
+            line.pop();
+            let line = String::from_utf8(line)?;
+            let parts = line.split(' ').collect_vec();
+            let mut hash = [0u8; 20];
+            input.read_exact(&mut hash)?;
+            items.push(TreeItem {
+                _mode: parts[0].to_owned(),
+                name: parts[1].to_owned(),
+                _hash: hash,
+            });
+        }
+
+        Ok(Self { _size: size, items })
     }
 }
