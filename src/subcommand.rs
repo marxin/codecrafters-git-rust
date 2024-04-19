@@ -7,7 +7,8 @@ use std::fs;
 use std::fs::File;
 use std::io;
 use std::io::{BufReader, BufWriter, Write};
-use std::path::PathBuf;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 use crate::object::{BlobObject, TreeObject};
 
@@ -65,6 +66,9 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
                 fs::create_dir(folder)?;
             }
         }
+        if blob_object_path.exists() {
+            return Ok(hash);
+        }
         let object_file = BufWriter::new(File::create(blob_object_path)?);
         let mut encoder = ZlibEncoder::new(object_file, Compression::fast());
 
@@ -73,4 +77,75 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
     }
 
     Ok(hash)
+}
+
+fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
+    let mut entries = fs::read_dir(path)?
+        .map(|res| res.map(|e| e.path()))
+        .collect::<Result<Vec<_>, io::Error>>()?;
+    entries.sort();
+
+    let mut content = Vec::new();
+    for entry in entries {
+        let filename = entry
+            .file_name()
+            .ok_or(anyhow::anyhow!("missing filename"))?
+            .to_str()
+            .ok_or(anyhow::anyhow!("cannot get string"))?;
+        if filename.starts_with('.') {
+            continue;
+        }
+
+        let hash: String = if entry.is_file() {
+            hash_object(&entry, true)
+        } else {
+            write_dir_hash(&entry)
+        }?;
+        let hash = hex::decode(hash)?;
+
+        let mode = if entry.is_file() {
+            if entry.metadata()?.permissions().mode() & 0o222 != 0 {
+                "100755"
+            } else {
+                "100644"
+            }
+        } else if entry.is_dir() {
+            "040000"
+        } else {
+            todo!("unknown entry type")
+        };
+
+        content.extend(mode.as_bytes());
+        content.extend(b" ");
+        content.extend(filename.as_bytes());
+        content.extend(b"\0");
+        content.extend(&hash);
+    }
+
+    let mut hasher = Sha1::new();
+    let header = format!("tree {}\0", content.len());
+    hasher.update(&header);
+    hasher.update(&content);
+
+    let hash = hex::encode(hasher.finalize()).to_string();
+
+    let tree_object_path = PathBuf::from(object_path_from_hash(&hash));
+    if let Some(folder) = tree_object_path.parent() {
+        if !folder.exists() {
+            fs::create_dir(folder)?;
+        }
+    }
+
+    let tree_file = BufWriter::new(File::create(&tree_object_path)?);
+    let mut encoder = ZlibEncoder::new(tree_file, Compression::fast());
+    let _ = encoder.write(header.as_bytes());
+    let _ = encoder.write(&content);
+    // TODO: check return values from write
+
+    Ok(hash)
+}
+
+pub fn write_tree() -> anyhow::Result<String> {
+    let cwd = Path::new(".");
+    write_dir_hash(cwd)
 }

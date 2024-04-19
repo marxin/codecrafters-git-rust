@@ -2,6 +2,8 @@ use std::io::BufRead;
 
 use itertools::Itertools;
 
+pub type ShaHash = [u8; 20];
+
 pub struct BlobObject {
     pub _size: usize,
     pub content: String,
@@ -39,7 +41,7 @@ impl BlobObject {
 pub struct TreeItem {
     pub _mode: String,
     pub name: String,
-    pub _hash: [u8; 20],
+    pub _hash: ShaHash,
 }
 
 pub struct TreeObject {
@@ -71,7 +73,7 @@ impl TreeObject {
             line.pop();
             let line = String::from_utf8(line)?;
             let parts = line.split(' ').collect_vec();
-            let mut hash = [0u8; 20];
+            let mut hash = ShaHash::default();
             input.read_exact(&mut hash)?;
             items.push(TreeItem {
                 _mode: parts[0].to_owned(),

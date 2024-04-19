@@ -21,6 +21,8 @@ enum Commands {
     HashObject(HashObjectArgs),
     /// Inspect a tree object
     LsTree(LsTreeArgs),
+    /// Write tree object
+    WriteTree,
 }
 
 #[derive(Args)]
@@ -86,6 +88,14 @@ fn main() {
                 }
             }
         },
+        Some(Commands::WriteTree) => {
+            let hash = subcommand::write_tree();
+            if let Err(err) = hash {
+                eprintln!("git write-tree failed with: {err}");
+            } else {
+                println!("{}", hash.unwrap());
+            }
+        }
         None => todo!(),
     }
 }
