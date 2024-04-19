@@ -104,7 +104,7 @@ fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
         let hash = hex::decode(hash)?;
 
         let mode = if entry.is_file() {
-            if entry.metadata()?.permissions().mode() & 0o222 != 0 {
+            if entry.metadata()?.permissions().mode() & 0o011 != 0 {
                 "100755"
             } else {
                 "100644"
@@ -120,6 +120,7 @@ fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
         content.extend(filename.as_bytes());
         content.extend(b"\0");
         content.extend(&hash);
+        assert_eq!(hash.len(), 20);
     }
 
     let mut hasher = Sha1::new();
@@ -138,8 +139,8 @@ fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
 
     let tree_file = BufWriter::new(File::create(&tree_object_path)?);
     let mut encoder = ZlibEncoder::new(tree_file, Compression::fast());
-    let _ = encoder.write(header.as_bytes());
-    let _ = encoder.write(&content);
+    let _ = encoder.write_all(header.as_bytes());
+    let _ = encoder.write_all(&content);
     // TODO: check return values from write
 
     Ok(hash)
