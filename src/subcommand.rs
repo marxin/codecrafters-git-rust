@@ -110,7 +110,7 @@ fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
                 "100644"
             }
         } else if entry.is_dir() {
-            "040000"
+            "40000"
         } else {
             todo!("unknown entry type")
         };
