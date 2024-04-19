@@ -72,7 +72,7 @@ pub fn hash_object(path: &PathBuf, write: bool) -> anyhow::Result<String> {
         let object_file = BufWriter::new(File::create(blob_object_path)?);
         let mut encoder = ZlibEncoder::new(object_file, Compression::fast());
 
-        let _ = encoder.write(header.as_bytes());
+        encoder.write_all(header.as_bytes())?;
         io::copy(&mut blob_file, &mut encoder)?;
     }
 
@@ -139,8 +139,8 @@ fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
 
     let tree_file = BufWriter::new(File::create(&tree_object_path)?);
     let mut encoder = ZlibEncoder::new(tree_file, Compression::fast());
-    let _ = encoder.write_all(header.as_bytes());
-    let _ = encoder.write_all(&content);
+    encoder.write_all(header.as_bytes())?;
+    encoder.write_all(&content)?;
     // TODO: check return values from write
 
     Ok(hash)
