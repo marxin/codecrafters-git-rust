@@ -166,6 +166,7 @@ pub fn commit_tree(tree: &str, parent: &str, message: &str) -> anyhow::Result<St
     content.push_str(&format!("author {}\n", &author_line));
     content.push_str(&format!("commiter {}\n\n", &author_line));
     content.push_str(message);
+    content.push('\n');
 
     let mut hasher = Sha1::new();
     let header = format!("commit {}\0", content.len());
