@@ -44,6 +44,19 @@ enum Commands {
     },
     /// Write tree object
     WriteTree,
+    /// Commit
+    CommitTree {
+        /// Hash
+        tree_object: String,
+
+        /// Parent commit hash
+        #[arg(short)]
+        parent: String,
+
+        /// Commit message
+        #[arg(short)]
+        message: String,
+    },
 }
 
 fn main() {
@@ -83,6 +96,18 @@ fn main() {
             let hash = subcommand::write_tree();
             if let Err(err) = hash {
                 eprintln!("git write-tree failed with: {err}");
+            } else {
+                println!("{}", hash.unwrap());
+            }
+        }
+        Commands::CommitTree {
+            tree_object,
+            parent,
+            message,
+        } => {
+            let hash = subcommand::commit_tree(&tree_object, &parent, &message);
+            if let Err(err) = hash {
+                eprintln!("git commit-tree failed with: {err}");
             } else {
                 println!("{}", hash.unwrap());
             }

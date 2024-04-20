@@ -1,4 +1,5 @@
 use anyhow::Context;
+use chrono::Local;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -149,4 +150,42 @@ fn write_dir_hash(path: &Path) -> anyhow::Result<String> {
 pub fn write_tree() -> anyhow::Result<String> {
     let cwd = Path::new(".");
     write_dir_hash(cwd)
+}
+
+pub fn commit_tree(tree: &str, parent: &str, message: &str) -> anyhow::Result<String> {
+    let mut content = String::new();
+    content.push_str(&format!("tree {tree}\n"));
+    content.push_str(&format!("parent {parent}\n"));
+
+    let now = Local::now();
+    let tz = now.offset().to_string().replace(':', "");
+    let author_line = format!(
+        "Martin Liska <martin.liska@hey.com> {} {tz}",
+        now.timestamp()
+    );
+    content.push_str(&format!("author {}\n", &author_line));
+    content.push_str(&format!("commiter {}\n\n", &author_line));
+    content.push_str(message);
+
+    let mut hasher = Sha1::new();
+    let header = format!("commit {}\0", content.len());
+    hasher.update(&header);
+    hasher.update(&content);
+
+    let hash = hex::encode(hasher.finalize()).to_string();
+
+    let tree_object_path = PathBuf::from(object_path_from_hash(&hash));
+    if let Some(folder) = tree_object_path.parent() {
+        if !folder.exists() {
+            fs::create_dir(folder)?;
+        }
+    }
+
+    let commit_file = BufWriter::new(File::create(&tree_object_path)?);
+    let mut encoder = ZlibEncoder::new(commit_file, Compression::fast());
+    encoder.write_all(header.as_bytes())?;
+    encoder.write_all(content.as_bytes())?;
+    // TODO: check return values from write
+
+    Ok(hash)
 }

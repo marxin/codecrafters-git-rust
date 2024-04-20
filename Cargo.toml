@@ -21,3 +21,4 @@ hex = "0.4.3"                                                      # working wit
 anyhow = "1.0.59"                                                  # error handling
 thiserror = "1.0.32"                                               # error handling
 itertools = "0.12.1"
+chrono = "0.4.38"
