@@ -6,10 +6,11 @@ use flate2::Compression;
 use sha1::{Digest, Sha1};
 use std::fs;
 use std::fs::File;
-use std::io;
+use std::io::{self, Read};
 use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::str;
 
 use crate::object::{BlobObject, TreeObject};
 
@@ -189,4 +190,78 @@ pub fn commit_tree(tree: &str, parent: &str, message: &str) -> anyhow::Result<St
     // TODO: check return values from write
 
     Ok(hash)
+}
+
+pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
+    let body =
+        reqwest::blocking::get(format!("{url}/info/refs?service=git-upload-pack"))?.text()?;
+    let mut lines = body.lines();
+    assert!(lines.next().is_some_and(|l| l.starts_with("001e")));
+    let head: String = lines
+        .next()
+        .unwrap()
+        .strip_prefix("0000")
+        .unwrap()
+        .chars()
+        .skip(4)
+        .take(40)
+        .collect();
+    println!("{head}");
+
+    let client = reqwest::blocking::Client::new();
+    let mut res = client
+        .post(format!("{url}/git-upload-pack"))
+        .body(format!("0032want {head}\n00000009done\n"))
+        .send()?;
+
+    println!("{}", res.status());
+    const EXPECTED_PREFIX: &str = "0008NAK\nPACK";
+    let mut prefix = [0u8; EXPECTED_PREFIX.len()];
+    res.read_exact(&mut prefix)?;
+    assert_eq!(&prefix, EXPECTED_PREFIX.as_bytes());
+    let mut buffer = [0u8; 4];
+    res.read_exact(&mut buffer)?;
+    let version = u32::from_be_bytes(buffer);
+    res.read_exact(&mut buffer)?;
+    let objects = u32::from_be_bytes(buffer);
+    println!("{version} {objects}");
+
+    for _ in 0..objects {
+        let mut v = [0u8; 1];
+        res.read_exact(&mut v)?;
+        println!("{:0b}", v[0]);
+        assert!(v[0] & 0b1000_0000 != 0);
+
+        // First 3 bits encode object type
+        let object_type = (v[0] >> 4) & 0b111;
+        let mut size = (v[0] & 0b1111) as usize;
+        let mut bitcount = 4usize;
+
+        loop {
+            res.read_exact(&mut v)?;
+            let tmp = (v[0] & 0b0111_1111) as usize;
+            size |= tmp << bitcount;
+            bitcount += 7;
+
+            if v[0] >> 7 == 0 {
+                break;
+            }
+        }
+
+        println!("size={size}");
+        let mut zlib_reader = ZlibDecoder::new(&mut res);
+        let mut content = vec![0u8; size];
+        zlib_reader.read_exact(&mut content)?;
+
+        println!(
+            "objet_type={object_type}, size={}, start={}",
+            content.len(),
+            str::from_utf8(&content[..32])?
+        );
+        println!("total_in={}", zlib_reader.total_in());
+        // TODO
+        todo!();
+    }
+
+    Ok(())
 }

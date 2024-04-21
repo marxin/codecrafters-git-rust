@@ -57,6 +57,14 @@ enum Commands {
         #[arg(short)]
         message: String,
     },
+    /// Clone a repository with HTTP protocol
+    Clone {
+        /// URL
+        url: String,
+
+        /// Output directory
+        dir: PathBuf,
+    },
 }
 
 fn main() {
@@ -110,6 +118,12 @@ fn main() {
                 eprintln!("git commit-tree failed with: {err}");
             } else {
                 println!("{}", hash.unwrap());
+            }
+        }
+        Commands::Clone { url, dir } => {
+            let hash = subcommand::clone(&url, &dir);
+            if let Err(err) = hash {
+                eprintln!("git clone failed with: {err}");
             }
         }
     }
