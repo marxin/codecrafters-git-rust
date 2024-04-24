@@ -235,6 +235,61 @@ impl ObjectSizeType {
     }
 }
 
+#[derive(Debug)]
+enum CopyCommand {
+    FromReference {
+        offsets: Vec<usize>,
+        sizes: Vec<usize>,
+    },
+    Direct {
+        size: u8,
+        data: Vec<u8>,
+    },
+}
+
+impl CopyCommand {
+    fn try_parse(reader: &mut dyn Read) -> anyhow::Result<CopyCommand> {
+        let mut header = [0u8; 1];
+        reader.read_exact(&mut header)?;
+        let header = header[0];
+
+        match header >> 7 {
+            0 => {
+                let size = header & 0b0111_1111;
+                let mut data = vec![0u8; size as usize];
+                reader.read_exact(&mut data)?;
+                Ok(CopyCommand::Direct { size, data })
+            }
+            1 => {
+                let mut buffer = [0u8; 1];
+                let mut offsets = Vec::new();
+                let mut sizes = Vec::new();
+
+                for i in 0..4 {
+                    if header & (1u8 << i) != 0 {
+                        reader.read_exact(&mut buffer)?;
+                        offsets.push(buffer[0] as usize);
+                    } else {
+                        offsets.push(0);
+                    }
+                }
+
+                for i in 0..3 {
+                    if header & (1u8 << (i + 4)) != 0 {
+                        reader.read_exact(&mut buffer)?;
+                        sizes.push(buffer[0] as usize);
+                    } else {
+                        sizes.push(0x10000);
+                    }
+                }
+
+                Ok(CopyCommand::FromReference { offsets, sizes })
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
     let body =
         reqwest::blocking::get(format!("{url}/info/refs?service=git-upload-pack"))?.text()?;
@@ -306,8 +361,9 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
                 let mut zlib_reader = ZlibDecoder::new(reader);
                 let base_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
                 let final_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
+                let copy_command = CopyCommand::try_parse(&mut zlib_reader)?;
 
-                println!("base_size: {base_size}, final_size: {final_size}");
+                println!("base_size: {base_size}, final_size: {final_size}, copy_command: {copy_command:?}");
                 todo!();
             }
             _ => unimplemented!(),
