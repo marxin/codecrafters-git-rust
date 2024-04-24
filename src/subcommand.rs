@@ -6,7 +6,7 @@ use flate2::Compression;
 use sha1::{Digest, Sha1};
 use std::fs;
 use std::fs::File;
-use std::io::{self, BufRead, Read};
+use std::io::{self, Read};
 use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -195,7 +195,7 @@ pub fn commit_tree(tree: &str, parent: &str, message: &str) -> anyhow::Result<St
 struct ObjectSize(usize);
 
 impl ObjectSize {
-    fn try_parse(reader: &mut dyn BufRead) -> anyhow::Result<ObjectSize> {
+    fn try_parse(reader: &mut dyn Read) -> anyhow::Result<ObjectSize> {
         let mut size = 0usize;
         let mut bitcount = 0usize;
 
@@ -221,7 +221,7 @@ struct ObjectSizeType {
 }
 
 impl ObjectSizeType {
-    fn try_parse(reader: &mut dyn BufRead) -> anyhow::Result<ObjectSizeType> {
+    fn try_parse(reader: &mut dyn Read) -> anyhow::Result<ObjectSizeType> {
         let mut size = ObjectSize::try_parse(reader)?;
         let object_type = ((size.0 >> 4) & 0b111) as u8;
 
@@ -299,16 +299,15 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
                 reader = zlib_reader.into_inner();
             }
             7 => {
-                let mut hash = [0u8; 20];
-                reader.read_exact(&mut hash)?;
+                let mut base_hash = [0u8; 20];
+                reader.read_exact(&mut base_hash)?;
 
                 // TODO: read sizes
                 let mut zlib_reader = ZlibDecoder::new(reader);
+                let base_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
+                let final_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
 
-                println!("base: {}", hex::encode(hash));
-                let mut x = [0u8; 6];
-                zlib_reader.read_exact(&mut x)?;
-                println!("{:x?}", x);
+                println!("base_size: {base_size}, final_size: {final_size}");
                 todo!();
             }
             _ => unimplemented!(),
