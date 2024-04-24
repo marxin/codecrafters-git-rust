@@ -1,12 +1,12 @@
 use anyhow::Context;
 use chrono::Local;
-use flate2::read::ZlibDecoder;
+use flate2::bufread::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
 use std::fs;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read};
 use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -30,7 +30,7 @@ pub fn init() -> anyhow::Result<()> {
 pub fn cat_file(hash: &str) -> anyhow::Result<()> {
     let object = File::open(object_path_from_hash(hash))
         .with_context(|| anyhow::anyhow!("cannot open hash object file: {hash}"))?;
-    let mut bufreader = BufReader::new(ZlibDecoder::new(object));
+    let mut bufreader = BufReader::new(ZlibDecoder::new(BufReader::new(object)));
     let blob = BlobObject::read(&mut bufreader)?;
     print!("{}", blob.content);
 
@@ -40,7 +40,7 @@ pub fn cat_file(hash: &str) -> anyhow::Result<()> {
 pub fn ls_tree(hash: &str) -> anyhow::Result<()> {
     let object = File::open(object_path_from_hash(hash))
         .with_context(|| anyhow::anyhow!("cannot open hash object file: {hash}"))?;
-    let mut bufreader = BufReader::new(ZlibDecoder::new(object));
+    let mut bufreader = BufReader::new(ZlibDecoder::new(BufReader::new(object)));
     let tree = TreeObject::read(&mut bufreader)?;
     for entry in tree.items {
         println!("{}", entry.name);
@@ -192,6 +192,49 @@ pub fn commit_tree(tree: &str, parent: &str, message: &str) -> anyhow::Result<St
     Ok(hash)
 }
 
+struct ObjectSize(usize);
+
+impl ObjectSize {
+    fn try_parse(reader: &mut dyn BufRead) -> anyhow::Result<ObjectSize> {
+        let mut size = 0usize;
+        let mut bitcount = 0usize;
+
+        loop {
+            let mut v = [0u8; 1];
+            reader.read_exact(&mut v)?;
+            let tmp = (v[0] & 0b0111_1111) as usize;
+            size |= tmp << bitcount;
+            bitcount += 7;
+
+            if v[0] >> 7 == 0 {
+                break;
+            }
+        }
+
+        Ok(ObjectSize(size))
+    }
+}
+
+struct ObjectSizeType {
+    size: ObjectSize,
+    object_type: u8,
+}
+
+impl ObjectSizeType {
+    fn try_parse(reader: &mut dyn BufRead) -> anyhow::Result<ObjectSizeType> {
+        let mut size = ObjectSize::try_parse(reader)?;
+        let object_type = ((size.0 >> 4) & 0b111) as u8;
+
+        // we need to preserve lowest 4 bits before we remove bits 5,6 and 7 by shifting
+        let lower = size.0 & 0b1111;
+        size.0 >>= 7;
+        size.0 <<= 4;
+        size.0 += lower;
+
+        Ok(ObjectSizeType { size, object_type })
+    }
+}
+
 pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
     let body =
         reqwest::blocking::get(format!("{url}/info/refs?service=git-upload-pack"))?.text()?;
@@ -224,43 +267,52 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
     let version = u32::from_be_bytes(buffer);
     res.read_exact(&mut buffer)?;
     let objects = u32::from_be_bytes(buffer);
-    println!("{version} {objects}");
+    println!("version: {version} objects:{objects}");
 
+    let mut reader = BufReader::new(res);
     for _ in 0..objects {
-        let mut v = [0u8; 1];
-        res.read_exact(&mut v)?;
-        println!("{:0b}", v[0]);
-        assert!(v[0] & 0b1000_0000 != 0);
+        let ObjectSizeType { size, object_type } = ObjectSizeType::try_parse(&mut reader)?;
+        let size = size.0;
 
-        // First 3 bits encode object type
-        let object_type = (v[0] >> 4) & 0b111;
-        let mut size = (v[0] & 0b1111) as usize;
-        let mut bitcount = 4usize;
+        match object_type {
+            1..=4 => {
+                let mut zlib_reader = ZlibDecoder::new(reader);
+                let mut content = Vec::new();
+                zlib_reader.read_to_end(&mut content)?;
+                let mut hasher = Sha1::new();
+                let object_type = match object_type {
+                    1 => "commit",
+                    2 => "tree",
+                    3 => "blob",
+                    _ => todo!(),
+                };
 
-        loop {
-            res.read_exact(&mut v)?;
-            let tmp = (v[0] & 0b0111_1111) as usize;
-            size |= tmp << bitcount;
-            bitcount += 7;
+                hasher.update(format!("{object_type} {size}\0"));
+                hasher.update(&content);
+                let hash = hex::encode(hasher.finalize());
+                assert_eq!(size, content.len());
 
-            if v[0] >> 7 == 0 {
-                break;
+                println!(
+                    "{hash} {object_type} {size} ...{}",
+                    str::from_utf8(&content[..16])?
+                );
+                reader = zlib_reader.into_inner();
             }
+            7 => {
+                let mut hash = [0u8; 20];
+                reader.read_exact(&mut hash)?;
+
+                // TODO: read sizes
+                let mut zlib_reader = ZlibDecoder::new(reader);
+
+                println!("base: {}", hex::encode(hash));
+                let mut x = [0u8; 6];
+                zlib_reader.read_exact(&mut x)?;
+                println!("{:x?}", x);
+                todo!();
+            }
+            _ => unimplemented!(),
         }
-
-        println!("size={size}");
-        let mut zlib_reader = ZlibDecoder::new(&mut res);
-        let mut content = vec![0u8; size];
-        zlib_reader.read_exact(&mut content)?;
-
-        println!(
-            "objet_type={object_type}, size={}, start={}",
-            content.len(),
-            str::from_utf8(&content[..32])?
-        );
-        println!("total_in={}", zlib_reader.total_in());
-        // TODO
-        todo!();
     }
 
     Ok(())
