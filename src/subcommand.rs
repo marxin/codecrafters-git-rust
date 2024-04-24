@@ -322,7 +322,7 @@ fn move_based_on_hash() -> anyhow::Result<String> {
     Ok(hash)
 }
 
-pub fn clone(url: &str, path: &Path) -> anyhow::Result<()> {
+pub fn clone(url: &str, path: &Path, verbose: bool) -> anyhow::Result<()> {
     let body =
         reqwest::blocking::get(format!("{url}/info/refs?service=git-upload-pack"))?.text()?;
     let mut lines = body.lines();
@@ -384,7 +384,9 @@ pub fn clone(url: &str, path: &Path) -> anyhow::Result<()> {
                 assert_eq!(size, content.len());
 
                 let hash = move_based_on_hash()?;
-                println!("{hash} {object_type} {size}");
+                if verbose {
+                    println!("{hash} {object_type} {size}");
+                }
                 reader = zlib_reader.into_inner();
             }
             7 => {
@@ -434,7 +436,9 @@ pub fn clone(url: &str, path: &Path) -> anyhow::Result<()> {
 
                 drop(f);
                 let hash = move_based_on_hash()?;
-                println!("{hash} {object_type} {size}");
+                if verbose {
+                    println!("{hash} {object_type} {size}");
+                }
                 reader = zlib_reader.into_inner();
             }
             _ => unimplemented!(),

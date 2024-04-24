@@ -64,6 +64,10 @@ enum Commands {
 
         /// Output directory
         dir: PathBuf,
+
+        /// Verbose
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -120,8 +124,8 @@ fn main() {
                 println!("{}", hash.unwrap());
             }
         }
-        Commands::Clone { url, dir } => {
-            let hash = subcommand::clone(&url, &dir);
+        Commands::Clone { url, dir, verbose } => {
+            let hash = subcommand::clone(&url, &dir, verbose);
             if let Err(err) = hash {
                 eprintln!("git clone failed with: {err}");
             }
