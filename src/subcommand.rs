@@ -237,14 +237,8 @@ impl ObjectSizeType {
 
 #[derive(Debug)]
 enum CopyCommand {
-    FromReference {
-        offsets: Vec<usize>,
-        sizes: Vec<usize>,
-    },
-    Direct {
-        size: u8,
-        data: Vec<u8>,
-    },
+    FromReference { offset: usize, size: usize },
+    Direct { size: u8, data: Vec<u8> },
 }
 
 impl CopyCommand {
@@ -262,30 +256,37 @@ impl CopyCommand {
             }
             1 => {
                 let mut buffer = [0u8; 1];
-                let mut offsets = Vec::new();
-                let mut sizes = Vec::new();
+                let mut offset = 0;
+                let mut size = 0;
 
                 for i in 0..4 {
                     if header & (1u8 << i) != 0 {
                         reader.read_exact(&mut buffer)?;
-                        offsets.push(buffer[0] as usize);
-                    } else {
-                        offsets.push(0);
+                        offset += (buffer[0] as usize) << (8 * i);
                     }
                 }
 
                 for i in 0..3 {
                     if header & (1u8 << (i + 4)) != 0 {
                         reader.read_exact(&mut buffer)?;
-                        sizes.push(buffer[0] as usize);
-                    } else {
-                        sizes.push(0x10000);
+                        size += (buffer[0] as usize) << (8 * i);
                     }
                 }
 
-                Ok(CopyCommand::FromReference { offsets, sizes })
+                if size == 0 {
+                    size = 0x10000;
+                }
+
+                Ok(CopyCommand::FromReference { offset, size })
             }
             _ => unreachable!(),
+        }
+    }
+
+    fn size(&self) -> usize {
+        match self {
+            CopyCommand::Direct { size: _, data } => data.len(),
+            CopyCommand::FromReference { offset: _, size } => *size,
         }
     }
 }
@@ -349,7 +350,7 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
 
                 println!(
                     "{hash} {object_type} {size} ...{}",
-                    str::from_utf8(&content[..16])?
+                    str::from_utf8(&content[..12])?
                 );
                 reader = zlib_reader.into_inner();
             }
@@ -361,10 +362,17 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
                 let mut zlib_reader = ZlibDecoder::new(reader);
                 let base_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
                 let final_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
-                let copy_command = CopyCommand::try_parse(&mut zlib_reader)?;
 
-                println!("base_size: {base_size}, final_size: {final_size}, copy_command: {copy_command:?}");
-                todo!();
+                println!("base_size: {base_size}, final_size: {final_size}");
+
+                let mut current_size = 0;
+                while current_size != final_size {
+                    let copy_command = CopyCommand::try_parse(&mut zlib_reader)?;
+                    println!("{copy_command:?}");
+                    current_size += copy_command.size();
+                }
+
+                reader = zlib_reader.into_inner();
             }
             _ => unimplemented!(),
         }
