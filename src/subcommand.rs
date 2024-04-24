@@ -4,16 +4,17 @@ use flate2::bufread::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
-use std::cmp::min;
-use std::fs;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read};
 use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::str;
+use std::{env, fs};
 
 use crate::object::{BlobObject, TreeObject};
+
+const TEMPORARY: &str = "temporary";
 
 fn object_path_from_hash(hash: &str) -> String {
     format!(".git/objects/{}/{}", &hash[0..2], &hash[2..])
@@ -292,7 +293,35 @@ impl CopyCommand {
     }
 }
 
-pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
+fn move_based_on_hash() -> anyhow::Result<String> {
+    let mut hasher = Sha1::new();
+    let mut buffer = [0u8; 1024];
+    let mut f = File::open(TEMPORARY)?;
+    loop {
+        let n = f.read(&mut buffer)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buffer[..n]);
+    }
+
+    let hash: String = hex::encode(hasher.finalize()).to_string();
+    let tree_object_path: PathBuf = object_path_from_hash(&hash).into();
+    if let Some(folder) = tree_object_path.parent() {
+        if !folder.exists() {
+            fs::create_dir(folder)?;
+        }
+    }
+
+    let mut f = File::open(TEMPORARY)?;
+    let mut encoder = ZlibEncoder::new(File::create(tree_object_path)?, Compression::fast());
+    io::copy(&mut f, &mut encoder)?;
+
+    fs::remove_file(TEMPORARY)?;
+    Ok(hash)
+}
+
+pub fn clone(url: &str, path: &Path) -> anyhow::Result<()> {
     let body =
         reqwest::blocking::get(format!("{url}/info/refs?service=git-upload-pack"))?.text()?;
     let mut lines = body.lines();
@@ -326,6 +355,10 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
     let objects = u32::from_be_bytes(buffer);
     println!("version: {version} objects:{objects}");
 
+    fs::create_dir(path)?;
+    env::set_current_dir(path)?;
+    init()?;
+
     let mut reader = BufReader::new(res);
     for _ in 0..objects {
         let ObjectSizeType { size, object_type } = ObjectSizeType::try_parse(&mut reader)?;
@@ -336,7 +369,6 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
                 let mut zlib_reader = ZlibDecoder::new(reader);
                 let mut content = Vec::new();
                 zlib_reader.read_to_end(&mut content)?;
-                let mut hasher = Sha1::new();
                 let object_type = match object_type {
                     1 => "commit",
                     2 => "tree",
@@ -344,30 +376,64 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
                     _ => todo!(),
                 };
 
-                hasher.update(format!("{object_type} {size}\0"));
-                hasher.update(&content);
-                let hash = hex::encode(hasher.finalize());
+                let mut f = File::create(TEMPORARY)?;
+                f.write_all(format!("{object_type} {size}\0").as_bytes())?;
+                f.write_all(&content)?;
+                drop(f);
                 assert_eq!(size, content.len());
 
+                let hash = move_based_on_hash()?;
                 println!("{hash} {object_type} {size}");
                 reader = zlib_reader.into_inner();
             }
             7 => {
                 let mut base_hash = [0u8; 20];
                 reader.read_exact(&mut base_hash)?;
+                let base_hash = hex::encode(base_hash).to_string();
+
+                let mut f = File::create(TEMPORARY)?;
 
                 // TODO: read sizes
                 let mut zlib_reader = ZlibDecoder::new(reader);
                 let _ = ObjectSize::try_parse(&mut zlib_reader)?.0;
                 let final_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
+                // println!("base_hash: {}, final_size: {final_size}", object_path_from_hash(&base_hash));
 
                 let mut current_size = 0;
                 while current_size != final_size {
                     let copy_command = CopyCommand::try_parse(&mut zlib_reader)?;
-                    println!("  {copy_command:?}");
+                    match copy_command {
+                        CopyCommand::FromReference { offset, size } => {
+                            let mut decoder = BufReader::new(ZlibDecoder::new(BufReader::new(
+                                File::open(object_path_from_hash(&base_hash))?,
+                            )));
+                            let mut content = Vec::new();
+                            decoder.read_until(b'\0', &mut content)?;
+                            let object_type =
+                                &content[0..content.iter().position(|&x| x == b' ').unwrap()];
+                            if current_size == 0 {
+                                // write header
+                                f.write_all(object_type)?;
+                                f.write_all(b" ")?;
+                                f.write_all(final_size.to_string().as_bytes())?;
+                                f.write_all(b"\0")?;
+                            }
+                            // TODO
+                            let mut content = Vec::new();
+                            decoder.read_to_end(&mut content)?;
+                            f.write_all(&content[offset..offset + size])?;
+                        }
+                        CopyCommand::Direct { ref data } => {
+                            f.write_all(data)?;
+                        }
+                    }
+                    // println!("  {copy_command:?}");
                     current_size += copy_command.size();
                 }
 
+                drop(f);
+                let hash = move_based_on_hash()?;
+                println!("{hash} {object_type} {size}");
                 reader = zlib_reader.into_inner();
             }
             _ => unimplemented!(),
