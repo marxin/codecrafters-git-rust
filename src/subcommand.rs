@@ -9,6 +9,7 @@ use std::io::{self, BufRead, Read};
 use std::io::{BufReader, BufWriter, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::str;
 use std::{env, fs};
 
@@ -439,6 +440,9 @@ pub fn clone(url: &str, path: &Path) -> anyhow::Result<()> {
             _ => unimplemented!(),
         }
     }
+
+    // TODO: implement git checkout (extract-tree)
+    Command::new("git").arg("checkout").arg(head).output()?;
 
     Ok(())
 }
