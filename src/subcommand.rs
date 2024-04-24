@@ -4,6 +4,7 @@ use flate2::bufread::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use sha1::{Digest, Sha1};
+use std::cmp::min;
 use std::fs;
 use std::fs::File;
 use std::io::{self, Read};
@@ -238,7 +239,7 @@ impl ObjectSizeType {
 #[derive(Debug)]
 enum CopyCommand {
     FromReference { offset: usize, size: usize },
-    Direct { size: u8, data: Vec<u8> },
+    Direct { data: Vec<u8> },
 }
 
 impl CopyCommand {
@@ -252,7 +253,7 @@ impl CopyCommand {
                 let size = header & 0b0111_1111;
                 let mut data = vec![0u8; size as usize];
                 reader.read_exact(&mut data)?;
-                Ok(CopyCommand::Direct { size, data })
+                Ok(CopyCommand::Direct { data })
             }
             1 => {
                 let mut buffer = [0u8; 1];
@@ -285,7 +286,7 @@ impl CopyCommand {
 
     fn size(&self) -> usize {
         match self {
-            CopyCommand::Direct { size: _, data } => data.len(),
+            CopyCommand::Direct { data } => data.len(),
             CopyCommand::FromReference { offset: _, size } => *size,
         }
     }
@@ -348,10 +349,7 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
                 let hash = hex::encode(hasher.finalize());
                 assert_eq!(size, content.len());
 
-                println!(
-                    "{hash} {object_type} {size} ...{}",
-                    str::from_utf8(&content[..12])?
-                );
+                println!("{hash} {object_type} {size}");
                 reader = zlib_reader.into_inner();
             }
             7 => {
@@ -360,15 +358,13 @@ pub fn clone(url: &str, _path: &Path) -> anyhow::Result<()> {
 
                 // TODO: read sizes
                 let mut zlib_reader = ZlibDecoder::new(reader);
-                let base_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
+                let _ = ObjectSize::try_parse(&mut zlib_reader)?.0;
                 let final_size = ObjectSize::try_parse(&mut zlib_reader)?.0;
-
-                println!("base_size: {base_size}, final_size: {final_size}");
 
                 let mut current_size = 0;
                 while current_size != final_size {
                     let copy_command = CopyCommand::try_parse(&mut zlib_reader)?;
-                    println!("{copy_command:?}");
+                    println!("  {copy_command:?}");
                     current_size += copy_command.size();
                 }
 
